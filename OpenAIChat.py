@@ -26,15 +26,15 @@ retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k
 qa = ConversationalRetrievalChain.from_llm(OpenAI(temperature=0), retriever)
 chat_history = []
 
-'''
-Prompt the language model with user input
-
-Args:
-    input: User string input to prompt the language model
-Returns:
-    Language model response to the user
-'''
 def prompt(input):
+    '''
+    Prompt the language model with user input
+
+    Args:
+        input: User string input to prompt the language model
+    Returns:
+        Language model response to the user
+    '''
     # Check for API key
     if (os.getenv("OPENAI_API_KEY") is None):
         return "Please set the OPENAI_API_KEY environment variable."
