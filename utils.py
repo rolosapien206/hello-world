@@ -14,3 +14,10 @@ def load_embeddings(filename):
     with open(filename, 'r') as file:
         embeddings = json.load(file)
     return embeddings
+
+DOC_CHUNK_SIZE = 1000
+DOC_CHUNK_OVERLAP = 40
+DOC_DIRECTORY = './'
+EMBEDDING_FILE = 'embeddings.json'
+BATCH_SIZE = 100
+INDEX_NAME = "project-falcon"

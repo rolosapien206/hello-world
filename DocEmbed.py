@@ -3,6 +3,7 @@ import json
 from openai import OpenAI
 from langchain.text_splitter import CharacterTextSplitter
 from langchain_community.document_loaders import DirectoryLoader
+from utils import DOC_CHUNK_SIZE, DOC_CHUNK_OVERLAP, DOC_DIRECTORY, EMBEDDING_FILE
 
 '''
 This file handles the loading and embedding of documents.
@@ -20,18 +21,13 @@ Specifications:
     OpenAI embeds with a dimension of 1536 per character
 '''
 
-DOC_CHUNK_SIZE = 1000
-DOC_CHUNK_OVERLAP = 40
-DOC_DIRECTORY = './'
-EMBEDDING_FILE = 'embeddings.json'
-
-'''
-Load documents from a specified directory into a list
-
-Returns:
-    documents: List of documents loaded from the directory, split by chunks
-'''
 def load_documents():
+    '''
+    Load documents from a specified directory into a list
+
+    Returns:
+        documents: List of documents loaded from the directory, split by chunks
+    '''
     # Create document loaders
     pdf_loader = DirectoryLoader(DOC_DIRECTORY, glob='*.pdf')
     #txt_loader = DirectoryLoader(DOC_DIRECTORY, glob='*.txt')
@@ -68,16 +64,16 @@ def load_documents():
     
     return documents
 
-'''
-Embed documents using OpenAIEmbeddings
-
-Args:
-    documents: List of documents to embed
-
-Returns:
-    List of embedded documents
-'''
 def embed_documents(documents):
+    '''
+    Embed documents using OpenAIEmbeddings
+
+    Args:
+        documents: List of documents to embed
+
+    Returns:
+        List of embedded documents
+    '''
     # Use OpenAI to embed documents
     client = OpenAI(
         api_key=os.getenv("OPENAI_API_KEY")
@@ -100,14 +96,14 @@ def embed_documents(documents):
         })
     return embeddings
 
-'''
-Save generated embedding to a json file
-
-Args:
-    embeddings: List of embeddings to save
-    filename: Name of the file to save the embeddings
-'''
 def save_embeddings(embeddings, filename):
+    '''
+    Save generated embedding to a json file
+
+    Args:
+        embeddings: List of embeddings to save
+        filename: Name of the file to save the embeddings
+    '''
     print("Saving embedding...")
     with open(filename, 'w') as file:
         json.dump(embeddings, file)

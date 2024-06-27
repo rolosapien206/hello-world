@@ -1,16 +1,15 @@
 import gradio
 import os
+from openai import AuthenticationError, APIError, OpenAIError
+from langchain.chains import ConversationalRetrievalChain
 from langchain_openai import OpenAI, ChatOpenAI, OpenAIEmbeddings
 from langchain_pinecone import PineconeVectorStore
-from langchain.chains import ConversationalRetrievalChain
-from openai import AuthenticationError, APIError, OpenAIError
+from utils import INDEX_NAME
 
 '''
 This file contains the code for user prompting of the language model.
 The language model used is gpt 3.5 turbo and uses documents stored in Pinecone.
 '''
-
-EMBEDDING_FILE = 'embeddings.json'
 
 # Create LLM model instance
 llm = ChatOpenAI(
@@ -22,9 +21,7 @@ llm = ChatOpenAI(
             api_key = os.getenv("OPENAI_PRIV_KEY"),
         )
 
-index_name = "project-falcon"
-
-vectorstore = PineconeVectorStore.from_existing_index(index_name, OpenAIEmbeddings())
+vectorstore = PineconeVectorStore.from_existing_index(INDEX_NAME, OpenAIEmbeddings())
 retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k":2})
 qa = ConversationalRetrievalChain.from_llm(OpenAI(temperature=0), retriever)
 chat_history = []
