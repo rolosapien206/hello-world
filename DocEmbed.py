@@ -72,7 +72,7 @@ def embed_documents(documents):
         documents: List of documents to embed
 
     Returns:
-        List of embedded documents
+        List of JSON objects {doc_id, embeddings, metadata}
     '''
     # Use OpenAI to embed documents
     client = OpenAI(
