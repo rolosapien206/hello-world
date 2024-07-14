@@ -1,5 +1,6 @@
 import os
 import json
+import dotenv
 from openai import OpenAI
 from langchain.text_splitter import CharacterTextSplitter
 from langchain_community.document_loaders import DirectoryLoader
@@ -20,6 +21,9 @@ Format of saved json file:
 Specifications:
     OpenAI embeds with a dimension of 1536 per character
 '''
+
+# Load environment variables
+dotenv.load_dotenv()
 
 def load_documents():
     '''

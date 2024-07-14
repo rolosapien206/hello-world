@@ -1,5 +1,6 @@
 import gradio
 import os
+import dotenv
 from openai import AuthenticationError, APIError, OpenAIError
 from langchain.chains import ConversationalRetrievalChain
 from langchain_openai import OpenAI, ChatOpenAI, OpenAIEmbeddings
@@ -11,6 +12,9 @@ This file contains the code for user prompting of the language model.
 The language model used is gpt 3.5 turbo and uses documents stored in Pinecone.
 '''
 
+# Load environment variables
+dotenv.load_dotenv()
+
 # Create LLM model instance
 llm = ChatOpenAI(
             model = "gpt-3.5-turbo",
@@ -18,7 +22,7 @@ llm = ChatOpenAI(
             timeout = None,
             n = 1,
             max_retries = 1,
-            api_key = os.getenv("OPENAI_PRIV_KEY"),
+            api_key = os.getenv("OPENAI_API_KEY"),
         )
 
 vectorstore = PineconeVectorStore.from_existing_index(INDEX_NAME, OpenAIEmbeddings())

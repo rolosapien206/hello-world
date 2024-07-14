@@ -1,5 +1,6 @@
 import os
 import itertools
+import dotenv
 from pinecone import Pinecone, ServerlessSpec
 from utils import load_embeddings, EMBEDDING_FILE, BATCH_SIZE, INDEX_NAME
 
@@ -11,6 +12,9 @@ Format of json file:
         'doc_id': {filename}_{chunk number}
         'embeddings': List of embeddings for the chunk, one embedding for each character in chunk
 '''
+
+# Load environment variables
+dotenv.load_dotenv()
 
 def vectorize(embeddings):
     '''
