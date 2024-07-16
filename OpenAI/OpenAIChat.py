@@ -30,7 +30,7 @@ retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k
 qa = ConversationalRetrievalChain.from_llm(OpenAI(temperature=0), retriever)
 chat_history = []
 
-def prompt(input):
+def prompt(input, history):
     '''
     Prompt the language model with user input
 
@@ -39,6 +39,10 @@ def prompt(input):
     Returns:
         Language model response to the user
     '''
+    # Handle clearing history
+    if history.length == 0:
+        chat_history = []
+
     # Check for API key
     if (os.getenv("OPENAI_API_KEY") is None):
         return "Please set the OPENAI_API_KEY environment variable."
@@ -47,7 +51,6 @@ def prompt(input):
     try:
         result = qa({'question': input, 'chat_history': chat_history})
         chat_history.append((input, result['answer']))
-        print(chat_history)
         return result['answer']
     
     # Handle exceptions
@@ -60,11 +63,18 @@ def prompt(input):
     except Exception as e:
         return "Error: " + str(e)
 
+def upload_file(files):
+    file_paths = [file.name for file in files]
+    # Embed and upload these files into pinecone
+    return file_paths
+
 # Create a Gradio interface
-demo = gradio.Interface(
-    fn = prompt,
-    inputs = ["text"],
-    outputs = ["text"],
-)
+with gradio.Blocks() as demo:
+    chatbot = gradio.Chatbot(placeholder="What would you like to know?")
+    gradio.ChatInterface(fn=prompt, chatbot=chatbot)
+
+    file_output = gradio.File()
+    upload_button = gradio.UploadButton("Click to upload a file", file_types=["pdf, docx, txt"], file_count="multiple")
+    upload_button.upload(upload_file, upload_button, file_output)
 
 demo.launch()
