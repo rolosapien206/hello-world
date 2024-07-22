@@ -15,7 +15,7 @@ services:
       - 7860:7860
     env_file:
       - .env
-    image: openai-v1
+    image: ryanyyc/project-falcon:openai
 
 # The commented out section below is an example of how to define a PostgreSQL
 # database that your application can use. `depends_on` tells Docker Compose to

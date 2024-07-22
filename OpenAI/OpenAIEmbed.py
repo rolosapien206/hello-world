@@ -34,7 +34,8 @@ def load_documents():
     '''
     # Create document loaders
     pdf_loader = DirectoryLoader(DOC_DIRECTORY, glob='*.pdf')
-    #txt_loader = DirectoryLoader(DOC_DIRECTORY, glob='*.txt')
+    docx_loader = DirectoryLoader(DOC_DIRECTORY, glob='*.docx')
+    txt_loader = DirectoryLoader(DOC_DIRECTORY, glob='*.txt')
     loaders = [pdf_loader]
 
     # Load documents
