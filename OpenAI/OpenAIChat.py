@@ -5,12 +5,16 @@ import json
 import dotenv
 import pickle
 import itertools
+from collections import Counter
+from typing import List
 from openai import OpenAI as OpenAIClient
 from openai import AuthenticationError, APIError, OpenAIError
 from pinecone import Pinecone, ServerlessSpec
+from transformers import BertTokenizerFast
 from langchain.chains import ConversationalRetrievalChain
-from langchain_openai import OpenAI, ChatOpenAI, OpenAIEmbeddings
-from langchain_pinecone import PineconeVectorStore
+from langchain_core.documents import Document
+from langchain_core.retrievers import BaseRetriever
+from langchain_openai import OpenAI, ChatOpenAI
 from langchain.text_splitter import CharacterTextSplitter
 from langchain_community.document_loaders import DirectoryLoader
 
@@ -19,11 +23,26 @@ This file contains the code for user prompting of the language model.
 The language model used is gpt 3.5 turbo and uses documents stored in Pinecone.
 '''
 
+class HybridRetriever(BaseRetriever):
+
+    top_k = 5
+    alpha = 0.5
+
+    def __init__ (self, top_k, alpha):
+        super().__init__()
+        self.top_k = top_k
+        self.alpha = alpha
+    
+    def _get_relevant_documents(self, query: str) -> List[Document]:
+        results = hybrid_query(query, self.top_k, self.alpha)
+        print(results)
+        documents = [{"context": result['metadata']['context']} for result in results['matches']]
+        return documents
+
 # Load environment variables
 dotenv.load_dotenv()
 
 CHAT_HISTORY_FILE = "chat_history.pkl"
-UPLOADED_FILES = "uploaded_files.pkl"
 NEW_UPLOAD_DIRECTORY = "new_uploads/"
 PREV_UPLOAD_DIRECTORY = "prev_uploads/"
 DOC_CHUNK_SIZE = 1000
@@ -69,7 +88,8 @@ if INDEX_NAME not in existing_indexes:
     pc.create_index(
             name=INDEX_NAME,
             dimension=1536,
-            metric="cosine",
+            metric="dotproduct",
+            pod="s1",
             spec=ServerlessSpec(
                 cloud="aws",
                 region="us-east-1",
@@ -79,9 +99,14 @@ if INDEX_NAME not in existing_indexes:
 else:
     print(f"Index {INDEX_NAME} already exists")
 
-vectorstore = PineconeVectorStore.from_existing_index(INDEX_NAME, OpenAIEmbeddings())
-retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k":2})
-qa = ConversationalRetrievalChain.from_llm(OpenAI(temperature=0), retriever)
+# k = number of top results to retrieve
+# alpha = weight of the similarity search, 1 = focus on semantics, 0 = focus on keywords
+retriever = HybridRetriever(top_k=5, alpha=0.4)
+retriever_dict = {"retriever": retriever}
+qa = ConversationalRetrievalChain.from_llm(
+    llm=OpenAI(),
+    retriever=retriever_dict,
+)
 
 def initialize_chat_history():
     '''
@@ -93,26 +118,6 @@ def initialize_chat_history():
             chat_history = pickle.load(f)
     else:
         chat_history = []
-
-def vectorize(embeddings):
-    '''
-    Vectorize embeddings with document ids to prepare for insertion into Pinecone
-
-    Args:
-        embeddings: List of embeddings to vectorize
-
-    Returns:
-        List of vectors with tuples (chunk ids, embeddings)
-    '''
-    print("Vectorizing...")
-    vectors = []
-    for chunk in embeddings:
-        vectors.append((
-            chunk['doc_id'],
-            chunk['embeddings'],
-            chunk['metadata'],
-        ))
-    return vectors
 
 def chunks(iterable):
     '''
@@ -139,11 +144,13 @@ def upload_file(files):
 
     # Load documents
     documents = load_documents()
-    embeddings = embed_documents(documents)
-    save_embeddings(embeddings, EMBEDDING_FILE)
+    dense_embeddings = dense_embed(documents)
+    sparse_embeddings = sparse_embed(documents)
+
+    save_embeddings(dense_embeddings, EMBEDDING_FILE)
 
     # Upsert embeddings into Pinecone
-    upsert(embeddings)
+    upsert(dense_embeddings, sparse_embeddings)
 
     # Move newly uploaded files to previous uploads directory
     move_files()
@@ -197,7 +204,7 @@ def load_documents():
     
     return documents
 
-def embed_documents(documents):
+def dense_embed(documents):
     '''
     Embed documents using OpenAIEmbeddings
 
@@ -229,6 +236,37 @@ def embed_documents(documents):
         })
     return embeddings
 
+def sparse_embed(documents):
+    tokenizer = BertTokenizerFast.from_pretrained('bert-base-uncased')
+    sparse_embeds = []
+    for chunk in documents:
+        # Create batch of input_ids
+        inputs = tokenizer(
+            chunk.page_content, padding=True,
+            truncation=True,
+            max_length=512, special_tokens=False
+        )['input_ids']
+        # Create sparse dictionaries
+        sparse_embed = build_dict(inputs)
+        sparse_embeds.append(sparse_embed)
+    return sparse_embeds
+
+def build_dict(input_batch):
+    # Store a batch of sparse embeddings
+    sparse_emb = []
+    # Iterate through input batch
+    for token_ids in input_batch:
+        indices = []
+        values = []
+        # Convert the input_ids list to a dictionary of key to frequency values
+        freqs = dict(Counter(token_ids))
+        for idx in freqs:
+            indices.append(idx)
+            values.append(freqs[idx])
+        sparse_emb.append({'indices': indices, 'values': values})
+    # Return sparse_emb list
+    return sparse_emb
+
 def save_embeddings(embeddings, filename):
     '''
     Save generated embedding to a json file
@@ -241,12 +279,33 @@ def save_embeddings(embeddings, filename):
     with open(filename, 'w') as file:
         json.dump(embeddings, file)
 
-def upsert(embeddings):
+def vectorize(dense_embeddings, sparse_embeddings):
+    '''
+    Vectorize embeddings with document ids to prepare for insertion into Pinecone
+
+    Args:
+        embeddings: List of embeddings to vectorize
+
+    Returns:
+        List of vectors with tuples (chunk ids, embeddings)
+    '''
+    print("Vectorizing...")
+    vectors = []
+    for dense, sparse in zip(dense_embeddings, sparse_embeddings):
+        vectors.append({
+            'id': dense['doc_id'],
+            'sparse_values': sparse,
+            'values': dense['embeddings'],
+            'metadata': dense['metadata'],
+        })
+    return vectors
+
+def upsert(dense_embeddings, sparse_embeddings):
     '''
     Upsert embeddings into pinecone
     '''
     index = pc.Index(INDEX_NAME)
-    vectors = vectorize(embeddings)
+    vectors = vectorize(dense_embeddings, sparse_embeddings)
 
     # Insert vectors into database in chunks
     async_results = [
@@ -268,6 +327,49 @@ def move_files():
         if (os.path.isfile(file_path)):
             new_file_path = os.path.join(PREV_UPLOAD_DIRECTORY, file)
             shutil.move(file_path, new_file_path)
+
+def hybrid_scale(dense, sparse, alpha:float):
+    # Check alpha value in range 0 to 1
+    if alpha < 0 or alpha > 1:
+        raise ValueError("Alpha must be between 0 and 1")
+    
+    # Scale dense and sparse vectors to create hybrid search vectors
+    hdense = [v * alpha for v in dense]
+    hsparse = {
+        'indices': sparse['indices'],
+        'values': [v * (1 - alpha) for v in sparse['values']],
+    }
+    return hdense, hsparse
+
+def hybrid_query(question, top_k, alpha):
+    # Convert the question into a sparse vector
+    sparse_vec = sparse_embed([question])[0]
+
+    # Convert the question into a dense vector
+    client = OpenAIClient(
+        api_key=os.getenv("OPENAI_API_KEY")
+    )
+    query_embedding = client.embeddings.create(
+            model="text-embedding-3-small",
+            input=question,
+        )
+    dense_vec = [record.embedding for record in query_embedding.data][0]
+
+    # Scale alpha with hybrid_scale
+    dense_vec, sparse_vec = hybrid_scale(
+        dense_vec, sparse_vec, alpha
+    )
+
+    # Query pinecone with the query parameters
+    result = pc.query(
+        vector=dense_vec,
+        sparse_vector=sparse_vec[0],
+        top_k=top_k,
+        include_metadata=True
+    )
+    
+    # Return search results as json
+    return result
 
 def prompt(input, history):
     '''
