@@ -1,2 +1,14 @@
 .env
 .openai
+.dockerignore
+chat_history.pkl
+embeddings.json
+new_uploads/*
+prev_uploads/*
+
+
+# Work in Progress
+app.py
+index.html
+index.js
+index.css
