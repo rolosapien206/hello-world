@@ -6,18 +6,10 @@ import dotenv
 import pickle
 import itertools
 from collections import Counter
-from typing import List
-import asyncio
-from utils import load_embeddings
 from openai import OpenAI as OpenAIClient
-from openai import AuthenticationError, APIError, OpenAIError
 from pinecone import ServerlessSpec
 from pinecone.grpc import PineconeGRPC as Pinecone
 from transformers import BertTokenizerFast
-from langchain.chains import ConversationalRetrievalChain
-from langchain_core.documents import Document
-from langchain_core.retrievers import BaseRetriever
-from langchain_openai import OpenAI, ChatOpenAI
 from langchain.text_splitter import CharacterTextSplitter
 from langchain_community.document_loaders import DirectoryLoader
 
@@ -25,21 +17,6 @@ from langchain_community.document_loaders import DirectoryLoader
 This file contains the code for user prompting of the language model.
 The language model used is gpt 3.5 turbo and uses documents stored in Pinecone.
 '''
-
-class HybridRetriever(BaseRetriever):
-    top_k = 5
-    alpha = 0.5
-
-    def __init__ (self, top_k, alpha):
-        super().__init__()
-        self.top_k = top_k
-        self.alpha = alpha
-    
-    def _get_relevant_documents(self, query: str) -> List[Document]:
-        results = hybrid_query(query, self.top_k, self.alpha)
-        print(results)
-        documents = [{"context": result['metadata']['context']} for result in results['matches']]
-        return documents
 
 # Load environment variables
 dotenv.load_dotenv()
@@ -60,16 +37,7 @@ os.makedirs(NEW_UPLOAD_DIRECTORY, exist_ok=True)
 os.makedirs(PREV_UPLOAD_DIRECTORY, exist_ok=True)
 
 chat_history = []
-
-# Create LLM model instance
-llm = ChatOpenAI(
-            model = "gpt-3.5-turbo",
-            max_tokens = None,
-            timeout = None,
-            n = 1,
-            max_retries = 1,
-            api_key = os.getenv("OPENAI_API_KEY"),
-        )
+chatbot_history = []
 
 # Initialize Pinecone database
 try:
@@ -102,44 +70,32 @@ if INDEX_NAME not in existing_indexes:
 else:
     print(f"Index {INDEX_NAME} already exists")
 
-# k = number of top results to retrieve
-# alpha = weight of the similarity search, 1 = focus on semantics, 0 = focus on keywords
-retriever = HybridRetriever(top_k=5, alpha=0.4)
-# retriever_dict = {"retriever": retriever}
-# qa = ConversationalRetrievalChain.from_llm(
-#     llm=OpenAI(),
-#     retriever=retriever_dict,
-# )
 
 def initialize_chat_history():
     '''
     Initialize the chat history using the chat history pickle file.
     '''
-    global chat_history
+    global chatbot_history
+    loaded_chat_history = []
     if (os.path.exists(CHAT_HISTORY_FILE)):
         with open(CHAT_HISTORY_FILE, "rb") as f:
-            chat_history = pickle.load(f)
+            loaded_chat_history = pickle.load(f)
     else:
-        chat_history = []
-
-def chunks(iterable):
-    '''
-    Breaks vector list into chunks of BATCH_SIZE for parallel upserts
-
-    Args:
-        iterable: List of vectors to chunk
-    '''
-    it = iter(iterable)
-    chunk = tuple(itertools.islice(it, BATCH_SIZE))
-    while chunk:
-        yield chunk
-        chunk = tuple(itertools.islice(it, BATCH_SIZE))
+        loaded_chat_history = []
+    
+    for i in range(0, len(loaded_chat_history), 2):
+        chatbot_history.append((
+            loaded_chat_history[i]['content'],
+            loaded_chat_history[i+1]['content']
+        ))
 
 async def upload_file(files):
     '''
     Upload files to Pinecone
+
+    Args:
+        files: List of file paths to process
     '''
-    
     # Copy files to uploads directory for easier processing
     for file in files:
         file_path = os.path.join(NEW_UPLOAD_DIRECTORY, file.name.split('/')[-1])
@@ -147,8 +103,7 @@ async def upload_file(files):
 
     # Load documents
     documents = read_documents()
-    #dense_embeddings = dense_embed(documents)
-    dense_embeddings = load_embeddings(EMBEDDING_FILE)
+    dense_embeddings = dense_embed(documents)
     sparse_embeddings = sparse_embed(documents)
 
     #save_embeddings(dense_embeddings, EMBEDDING_FILE)
@@ -206,6 +161,7 @@ def read_documents():
         chunk.metadata['source'] = f"{prev_doc_id}_{chunk_num}"
         chunk_num += 1
     
+    print("Documents loaded")
     return documents
 
 def dense_embed(documents):
@@ -238,12 +194,24 @@ def dense_embed(documents):
             'embeddings': chunk_embedding[0],
             'metadata': {'source': chunk.metadata['source'], 'text': chunk.page_content}
         })
+    
+    print("Complete")
     return embeddings
 
 def sparse_embed(documents):
+    '''
+    Generate sparse embeddings for a list of documents
+    
+    Args:
+        documents: List of documents to generate sparse embeddings for
+        
+    Returns:
+        List of sparse embeddings in dictionary format
+    '''
     print("Generating sparse embeddings...")
     tokenizer = BertTokenizerFast.from_pretrained('bert-base-uncased')
     sparse_embeds = []
+
     for chunk in documents:
         # Create batch of input_ids
         inputs = tokenizer(
@@ -253,24 +221,39 @@ def sparse_embed(documents):
             max_length=512,
             add_special_tokens=False,
         )['input_ids']
+
         # Create sparse dictionaries
         sparse_embed = build_dict(inputs)
         sparse_embeds.append(sparse_embed)
+    
+    print("Complete")
     return sparse_embeds
 
 def build_dict(input_batch):
-    # Store a batch of sparse embeddings
+    '''
+    Build a dictionary for sparse embeddings
+
+    Args:
+        input_batch: List of embeddings to convert to a dictionary
+
+    Returns:
+        List of sparse embeddings in dictionary format
+    '''
+    print("Building dictionary for sparse embedding...")
     sparse_emb = []
+
     # Iterate through input batch
     indices = []
     values = []
-    # Convert the input_ids list to a dictionary of key to frequency values
+
+    # Convert the input_batch list to a dictionary of key to frequency values
     freqs = dict(Counter(input_batch))
     for idx in freqs:
         indices.append(idx)
         values.append(float(freqs[idx]))
     sparse_emb.append({'indices': indices, 'values': values})
-    # Return sparse_emb list
+
+    print("Complete")
     return sparse_emb
 
 def save_embeddings(embeddings, filename):
@@ -284,6 +267,22 @@ def save_embeddings(embeddings, filename):
     print("Saving embedding...")
     with open(filename, 'w') as file:
         json.dump(embeddings, file)
+    print("Complete")
+
+def chunks(iterable):
+    '''
+    Breaks vector list into chunks of BATCH_SIZE for parallel upserts
+
+    Args:
+        iterable: List of vectors to chunk
+    '''
+    print("Chunking")
+    it = iter(iterable)
+    chunk = tuple(itertools.islice(it, BATCH_SIZE))
+    while chunk:
+        yield chunk
+        chunk = tuple(itertools.islice(it, BATCH_SIZE))
+    print("Complete")
 
 def vectorize(dense_embeddings, sparse_embeddings):
     '''
@@ -300,38 +299,27 @@ def vectorize(dense_embeddings, sparse_embeddings):
     for dense, sparse in zip(dense_embeddings, sparse_embeddings):
         vectors.append({
             'id': dense['doc_id'],
-            'sparse_values': sparse[0],
             'values': dense['embeddings'],
+            'sparse_values': sparse[0],
             'metadata': dense['metadata'],
         })
+    print("Vectorized")
     return vectors
 
 async def upsert(dense_embeddings, sparse_embeddings):
     '''
     Upsert embeddings into pinecone
     '''
-    async def upsert_chunk(chunk):
-        return index.upsert(vectors=chunk, async_req=True)
-    
-    print("Upserting embeddings...")
     index = pc.Index(INDEX_NAME)
     vectors = vectorize(dense_embeddings, sparse_embeddings)
 
     # Insert vectors into database in chunks
-    tasks = [
-        upsert_chunk(vectors_chunk)
-        for vectors_chunk in chunks(vectors)
-    ]
+    print("Upserting embeddings...")
+    vector_chunks = chunks(vectors)
+    for chunk in vector_chunks:
+        index.upsert(chunk)
 
-    # Wait for all async upserts to complete
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    for result in results:
-        if isinstance(result, Exception):
-            print(f"Error upserting vectors: {result}")
-        else:
-            print(f"Upserted vectors")
-    
-    print("Inserted embeddings into Pinecone")
+    print("Complete")
 
 def move_files():
     '''
@@ -373,7 +361,6 @@ def hybrid_query(question, top_k, alpha):
                 input=question,
             )
         dense_vec = [record.embedding for record in query_embedding.data][0]
-        print(len(dense_vec))
         print("Complete")
 
         # Convert the question into a sparse vector
@@ -387,8 +374,6 @@ def hybrid_query(question, top_k, alpha):
             add_special_tokens=False,
         )['input_ids']
         sparse_vec = build_dict(inputs)[0]
-        print(len(sparse_vec['values']))
-        print(sparse_vec)
         print("Complete")
 
         # Scale alpha with hybrid_scale
@@ -399,65 +384,80 @@ def hybrid_query(question, top_k, alpha):
         # Query pinecone with the query parameters
         print("Querying Pinecone...")
         index = pc.Index(INDEX_NAME)
-        print(index.describe_index_stats())
         result = index.query(
             vector=dense_vec,
-            sparse_vector=sparse_vec[0],
+            sparse_vector=sparse_vec,
             top_k=top_k,
             include_values=True,
             include_metadata=True,
         )
-        print("Complete Query")
-        print(result)
+        print("Complete")
         
         # Return search results as json
         return result
     except Exception as e:
         print(f"Error querying Pinecone: {e}")
 
-def prompt(input, history):
+def prompt(question, history):
     '''
     Prompt the language model with user input
 
     Args:
-        input: User string input to prompt the language model
+        question: User string input to prompt the language model
     Returns:
         Language model response to the user
     '''
 
+    global chatbot_history
     global chat_history
 
     # Handle clearing history
     if len(history) == 0:
+        chatbot_history = []
         chat_history = []
+        with open(CHAT_HISTORY_FILE, "wb") as f:
+            pickle.dump(chat_history, f)
 
     # Check for API key
     if (os.getenv("OPENAI_API_KEY") is None):
         return "Please set the OPENAI_API_KEY environment variable."
     
-    # Prompt the language model
+    # Query database and prompt the language model with results
     try:
-        results = hybrid_query(input, 5, 0.4)
-        print(results)
-        return results
-        # result = qa({'question': input, 'chat_history': chat_history})
-        # chat_history.append((input, result['answer']))
+        # Query database for context
+        results = hybrid_query(question, top_k=5, alpha=0.4)
+        context = ""
+        for match in results['matches']:
+            context += match['metadata']['text'] + "\n"
+        
+        client = OpenAIClient()
 
-        # # Save chat history
-        # with open(CHAT_HISTORY_FILE, "wb") as f:
-        #     pickle.dump(chat_history, f)
+        # Prepare prompt with chat history
+        prompt = f"Context:\n{context}\n\nQuestion: {question}\nAnswer:"
+        messages = [{"role": "system", "content": "You are a helpful assistant."}]
+        messages.extend(chat_history)
+        messages.append({"role": "user", "content": prompt})
 
-        # #update_state()
+        print("Prompting language model...")
+        response = client.chat.completions.create(
+            messages=messages,
+            model="gpt-3.5-turbo",
+        )
 
-        # return result['answer']
+        # Extract answer from response
+        answer = response.choices[0].message.content.strip()
+
+        # Save chat history
+        chat_history.extend([
+            {"role": "user", "content": question},
+            {"role": "assistant", "content": answer},
+        ])
+        with open(CHAT_HISTORY_FILE, "wb") as f:
+            pickle.dump(chat_history, f)
+
+        return answer
     
     # Handle exceptions
-    except AuthenticationError as e: 
-        return "Authentication Error: " + e.message
-    except APIError as e:
-        return "API Error: " + e.message
-    except OpenAIError as e:
-        return "OpenAI Error: " + str(e)
     except Exception as e:
         return "Error: " + str(e)
 
@@ -473,22 +473,18 @@ def get_uploaded_files():
             uploaded_files.append(file_path)
     return uploaded_files
 
-# def update_state():
-#     global state
-#     state.value = (chat_history, uploaded_files)
-
 # Create a Gradio interface
 with gradio.Blocks() as demo:
     # Load chat history
     initialize_chat_history()
 
-    # Deal with refreshing the page and persisting changes
-    #state = gradio.State(value=(chat_history, uploaded_files))
+    # Create chatbot interface
     chatbot = gradio.Chatbot(value=chat_history, placeholder="What would you like to know?")
     gradio.ChatInterface(fn=prompt, chatbot=chatbot)
 
+    # Create file upload interface
     file_output = gradio.File(value=get_uploaded_files())
     upload_button = gradio.UploadButton("Click to upload a file", file_types=["pdf, docx, txt"], file_count="multiple")
     upload_button.upload(upload_file, upload_button, file_output)
 
-demo.launch()
+demo.launch(share=True)
