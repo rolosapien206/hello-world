@@ -29,7 +29,8 @@
 **/obj
 **/secrets.dev.yaml
 **/values.dev.yaml
-*/OpenAIEmbed.py
-*/OpenAIUpsert.py
+*/EmbedUpsert.py
+*/new_uploads
+*/prev_uploads
 LICENSE
 README.md
