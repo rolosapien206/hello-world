@@ -45,7 +45,6 @@ gradio==4.38.1
 gradio_client==1.1.0
 grpc-gateway-protoc-gen-openapiv2==0.1.0
 grpcio==1.65.1
-grpcio-status==1.65.1
 h11==0.14.0
 httpcore==1.0.5
 httptools==0.6.1
@@ -107,7 +106,7 @@ pinecone==4.0.0
 pinecone-client==3.2.2
 portalocker==2.10.1
 proto-plus==1.24.0
-protobuf==5.27.2
+protobuf
 psutil==6.0.0
 pyasn1==0.6.0
 pyasn1_modules==0.4.0
