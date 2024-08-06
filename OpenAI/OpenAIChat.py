@@ -6,6 +6,9 @@ import dotenv
 import pickle
 import itertools
 from collections import Counter
+from datetime import datetime
+from datasets import load_dataset
+from huggingface_hub import HfApi
 from openai import OpenAI as OpenAIClient
 from pinecone import ServerlessSpec
 from pinecone.grpc import PineconeGRPC as Pinecone
@@ -22,6 +25,7 @@ The language model used is gpt 3.5 turbo and uses documents stored in Pinecone.
 dotenv.load_dotenv()
 assert os.getenv("OPENAI_API_KEY") is not None, "Please set the OPENAI_API_KEY environment variable."
 assert os.getenv("PINECONE_API_KEY") is not None, "Please set the PINECONE_API_KEY environment variable."
+assert os.getenv("HUGGINGFACE_API_KEY") is not None, "Please set the HUGGINGFACE_API_KEY environment variable."
 
 CHAT_HISTORY_FILE = "chat_history.pkl"
 NEW_UPLOAD_DIRECTORY = "new_uploads/"
@@ -31,6 +35,8 @@ DOC_CHUNK_OVERLAP = 40
 EMBEDDING_FILE = 'embeddings.json'
 INDEX_NAME = "hybrid"
 BATCH_SIZE = 100
+INTERACTIONS_DATASET = "ryanRocks/FalconOpenAIInteractions"
+FILES_DATASET = "ryanRocks/FalconOpenAIFiles"
 
 # Ensure uploads directory exists
 os.makedirs(NEW_UPLOAD_DIRECTORY, exist_ok=True)
@@ -239,7 +245,6 @@ def build_dict(input_batch):
     Returns:
         List of sparse embeddings in dictionary format
     '''
-    print("Building dictionary for sparse embedding...")
     sparse_emb = []
 
     # Iterate through input batch
@@ -253,7 +258,6 @@ def build_dict(input_batch):
         values.append(float(freqs[idx]))
     sparse_emb.append({'indices': indices, 'values': values})
 
-    print("Complete")
     return sparse_emb
 
 def save_embeddings(embeddings, filename):
@@ -326,9 +330,18 @@ def move_files():
     Move uploaded files to the previous uploads directory
     '''
     print("Moving files...")
+    api = HfApi()
     for file in os.listdir(NEW_UPLOAD_DIRECTORY):
         file_path = os.path.join(NEW_UPLOAD_DIRECTORY, file)
         if (os.path.isfile(file_path)):
+            # Upload file to HuggingFace Datasets
+            api.upload_file(
+                path_or_fileobj = file_path,
+                path_in_repo = file,
+                repo_id = "ryanRocks/FalconOpenAIFiles",
+                repo_type = "dataset",
+            )
+            # Move file to previous uploads directory
             new_file_path = os.path.join(PREV_UPLOAD_DIRECTORY, file)
             shutil.move(file_path, new_file_path)
 
@@ -438,6 +451,7 @@ def prompt(question, history):
         messages.extend(chat_history)
         messages.append({"role": "user", "content": prompt})
 
+        time = datetime.now().isoformat()
         print("Prompting language model...")
         response = client.chat.completions.create(
             messages=messages,
@@ -447,11 +461,31 @@ def prompt(question, history):
         # Extract answer from response
         answer = response.choices[0].message.content.strip()
 
+        interaction = [
+            {"timestamp": time},
+            {"role": "user", "content": question},
+            {"role": "assistant", "content": answer},
+            {"full_prompt": messages},
+        ]
+
+        with open(f"{time}.json", "w") as f:
+            json.dump(interaction, f)
+
+        # Upload interaction to HuggingFace Datasets
+        api = HfApi()
+        api.upload_file(
+            path_or_fileobj = f"{time}.json",
+            path_in_repo = f"{time},json",
+            repo_id = INTERACTIONS_DATASET,
+            repo_type = "dataset",
+        )
+
         # Save chat history
         chat_history.extend([
             {"role": "user", "content": question},
             {"role": "assistant", "content": answer},
         ])
+
         with open(CHAT_HISTORY_FILE, "wb") as f:
             pickle.dump(chat_history, f)
 
@@ -487,4 +521,4 @@ with gradio.Blocks() as demo:
     upload_button = gradio.UploadButton("Click to upload a file", file_types=["pdf, docx, txt"], file_count="multiple")
     upload_button.upload(upload_file, upload_button, file_output)
 
-demo.launch(share=True)
+demo.launch()
