@@ -7,8 +7,7 @@ import pickle
 import itertools
 from collections import Counter
 from datetime import datetime
-from datasets import load_dataset
-from huggingface_hub import HfApi
+from huggingface_hub import HfApi, HfFolder
 from openai import OpenAI as OpenAIClient
 from pinecone import ServerlessSpec
 from pinecone.grpc import PineconeGRPC as Pinecone
@@ -26,6 +25,8 @@ dotenv.load_dotenv()
 assert os.getenv("OPENAI_API_KEY") is not None, "Please set the OPENAI_API_KEY environment variable."
 assert os.getenv("PINECONE_API_KEY") is not None, "Please set the PINECONE_API_KEY environment variable."
 assert os.getenv("HUGGINGFACE_API_KEY") is not None, "Please set the HUGGINGFACE_API_KEY environment variable."
+
+HfFolder.save_token(os.getenv("HUGGINGFACE_API_KEY"))
 
 CHAT_HISTORY_FILE = "chat_history.pkl"
 NEW_UPLOAD_DIRECTORY = "new_uploads/"
@@ -475,7 +476,7 @@ def prompt(question, history):
         api = HfApi()
         api.upload_file(
             path_or_fileobj = f"{time}.json",
-            path_in_repo = f"{time},json",
+            path_in_repo = f"{time}.json",
             repo_id = INTERACTIONS_DATASET,
             repo_type = "dataset",
         )
