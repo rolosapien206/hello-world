@@ -6,15 +6,13 @@ import torch
 import dotenv
 import pickle
 import itertools
-import nltk
 from collections import Counter
 from datetime import datetime
 from huggingface_hub import HfApi, HfFolder
-from openai import OpenAI as OpenAIClient
 from pinecone import ServerlessSpec
 from sentence_transformers import SentenceTransformer
 from pinecone.grpc import PineconeGRPC as Pinecone
-from transformers import pipeline, AutoModelForCausalLM, AutoTokenizer, BertTokenizerFast
+from transformers import pipeline, AutoModelForCausalLM, AutoTokenizer, AutoConfig, BertTokenizerFast
 from langchain.text_splitter import CharacterTextSplitter
 from langchain_community.document_loaders import DirectoryLoader
 
@@ -84,13 +82,18 @@ else:
 
 # Create Dolly 2.0 3 billion model
 print("Loading model")
-model = AutoModelForCausalLM.from_pretrained(
-    MODEL_NAME,
-    device_map="auto",
-    torch_dtype=torch.float16,
-    trust_remote_code=True,
-)
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, clean_up_tokenization_spaces=True)
+config = AutoConfig.from_pretrained("./saved_dolly")
+tokenizer = AutoTokenizer.from_pretrained("./saved_dolly")
+model = AutoModelForCausalLM.from_pretrained("./saved_dolly")
+# model.load_state_dict(torch.load("./saved_dolly/states", weights_only=True, map_location='cuda'))
+
+# model = AutoModelForCausalLM.from_pretrained(
+#     MODEL_NAME,
+#     device_map="auto",
+#     torch_dtype=torch.float16,
+#     trust_remote_code=True,
+# )
+# tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, clean_up_tokenization_spaces=True)
 
 # Create pipeline for prompting
 print("Creating pipeline")
@@ -99,7 +102,7 @@ pipe = pipeline(
     tokenizer=tokenizer,
     task='text-generation',
     torch_dtype=torch.float16,
-    device_map="auto",
+    device=0,
     max_new_tokens=300,
     return_full_text=False,
 )
@@ -542,4 +545,4 @@ with gradio.Blocks() as demo:
     upload_button = gradio.UploadButton("Click to upload a file", file_types=["pdf, docx, txt"], file_count="multiple")
     upload_button.upload(upload_file, upload_button, file_output)
 
-demo.launch()
+demo.launch(share=True)
