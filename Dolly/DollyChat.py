@@ -6,6 +6,7 @@ import torch
 import dotenv
 import pickle
 import itertools
+import nltk
 from collections import Counter
 from datetime import datetime
 from huggingface_hub import HfApi, HfFolder
@@ -35,11 +36,11 @@ PREV_UPLOAD_DIRECTORY = "prev_uploads/"
 DOC_CHUNK_SIZE = 1000
 DOC_CHUNK_OVERLAP = 40
 EMBEDDING_FILE = 'embeddings.json'
-INDEX_NAME = "hybrid"
+INDEX_NAME = "dolly"
 BATCH_SIZE = 100
 INTERACTIONS_DATASET = "ryanRocks/FalconDollyInteractions"
 FILES_DATASET = "ryanRocks/FalconDollyFiles"
-MODEL_NAME = "databricks/dolly-v2-12b"
+MODEL_NAME = "databricks/dolly-v2-3b"
 OFFLOAD_FOLDER = "./offload"
 MODEL_SAVE_FOLDER = "./saved_model.pth"
 
@@ -70,7 +71,7 @@ existing_indexes = [index.name for index in pc.list_indexes().indexes]
 if INDEX_NAME not in existing_indexes:
     pc.create_index(
             name=INDEX_NAME,
-            dimension=1536,
+            dimension=384,
             metric="dotproduct",
             spec=ServerlessSpec(
                 cloud="aws",
@@ -81,25 +82,26 @@ if INDEX_NAME not in existing_indexes:
 else:
     print(f"Index {INDEX_NAME} already exists")
 
-# Create Dolly 2.0 12 billion model
+# Create Dolly 2.0 3 billion model
+print("Loading model")
 model = AutoModelForCausalLM.from_pretrained(
     MODEL_NAME,
     device_map="auto",
-    offload_folder=OFFLOAD_FOLDER,
     torch_dtype=torch.float16,
     trust_remote_code=True,
 )
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, clean_up_tokenization_spaces=True)
 
-# Crate pipeline for prompting
+# Create pipeline for prompting
+print("Creating pipeline")
 pipe = pipeline(
     model=model,
     tokenizer=tokenizer,
     task='text-generation',
     torch_dtype=torch.float16,
     device_map="auto",
-    max_new_tokens=100,
-    return_full_text=True,
+    max_new_tokens=300,
+    return_full_text=False,
 )
 
 def initialize_chat_history():
@@ -213,7 +215,7 @@ def dense_embed(documents):
     # Embed each chunk
     for chunk in documents:
         embeddings.append({
-            'doc_id': chunk.metadata['source'],
+            'doc_id': chunk.metadata['source'].split('/')[-1],
             'embeddings': embedder.encode(chunk.page_content),
             'metadata': {'source': chunk.metadata['source'], 'text': chunk.page_content}
         })
@@ -383,14 +385,8 @@ def hybrid_query(question, top_k, alpha):
 
         # Convert the question into a dense vector
         print("Converting question to dense vector...")
-        client = OpenAIClient(
-            api_key=os.getenv("OPENAI_API_KEY")
-        )
-        query_embedding = client.embeddings.create(
-                model="text-embedding-3-small",
-                input=question,
-            )
-        dense_vec = [record.embedding for record in query_embedding.data][0]
+        embedder = SentenceTransformer('all-MiniLM-L6-v2')
+        dense_vec = embedder.encode(question)
         print("Complete")
 
         # Convert the question into a sparse vector
@@ -441,6 +437,8 @@ def prompt(question, history):
     global chatbot_history
     global chat_history
     global pipe
+    global model
+    global tokenizer
 
     # Handle clearing history
     if len(history) == 0:
@@ -463,11 +461,26 @@ def prompt(question, history):
         messages.extend(chat_history)
         messages.append({"role": "user", "content": prompt})
 
+        # Tokenize input
+        inputs = tokenizer(prompt, return_tensors="pt").to('cuda')
+
         time = datetime.now().isoformat()
         print("Prompting language model...")
         
         # Get answer
-        answer = pipe(prompt)[0].generated_text
+        # output = model.generate(
+        #     inputs=inputs['input_ids'],
+        #     attention_mask=inputs['attention_mask'],
+        #     max_new_tokens=300,
+        #     num_return_sequences=1,
+        #     top_k=50,
+        #     pad_token_id=tokenizer.eos_token_id,
+        # )
+        # generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
+        # print(generated_text)
+        # answer = generated_text
+
+        answer = pipe(prompt)[0]['generated_text']
 
         interaction = [
             {"timestamp": time},

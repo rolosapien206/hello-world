@@ -2,3 +2,6 @@
 /.dolly
 /.env
 /.saved_model.pth
+/chat_history.pkl
+new_uploads/
+prev_uploads/
