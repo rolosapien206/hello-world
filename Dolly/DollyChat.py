@@ -85,18 +85,18 @@ else:
 
 # Create Dolly 2.0 3 billion model
 print("Loading model")
-#config = AutoConfig.from_pretrained("./saved_dolly")
-#tokenizer = AutoTokenizer.from_pretrained("./saved_dolly")
-#model = AutoModelForCausalLM.from_pretrained("./saved_dolly")
+config = AutoConfig.from_pretrained("./saved_dolly")
+tokenizer = AutoTokenizer.from_pretrained("./saved_dolly")
+model = AutoModelForCausalLM.from_pretrained("./saved_dolly")
 # model.load_state_dict(torch.load("./saved_dolly/states", weights_only=True, map_location='cuda'))
 
-# model = AutoModelForCausalLM.from_pretrained(
+#model = AutoModelForCausalLM.from_pretrained(
 #     MODEL_NAME,
 #     device_map="auto",
 #     torch_dtype=torch.float16,
 #     trust_remote_code=True,
-# )
-# tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, clean_up_tokenization_spaces=True)
+#)
+#tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, clean_up_tokenization_spaces=True)
 
 # Create pipeline for prompting
 print("Creating pipeline")
