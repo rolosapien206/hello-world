@@ -14,11 +14,14 @@ from sentence_transformers import SentenceTransformer
 from pinecone.grpc import PineconeGRPC as Pinecone
 from transformers import pipeline, AutoModelForCausalLM, AutoTokenizer, AutoConfig, BertTokenizerFast
 from langchain.text_splitter import CharacterTextSplitter
+from langchain_experimental.text_splitter import SemanticChunker
+from langchain_openai.embeddings import OpenAIEmbeddings
+from langchain_ai21 import AI21SemanticTextSplitter
 from langchain_community.document_loaders import DirectoryLoader
 
 '''
 This file contains the code for user prompting of the language model.
-The language model used is databricks/dolly-v2-12b and uses documents stored in Pinecone.
+The language model used is databricks/dolly-v2-3b and uses documents stored in Pinecone.
 '''
 
 # Load environment variables
@@ -82,9 +85,9 @@ else:
 
 # Create Dolly 2.0 3 billion model
 print("Loading model")
-config = AutoConfig.from_pretrained("./saved_dolly")
-tokenizer = AutoTokenizer.from_pretrained("./saved_dolly")
-model = AutoModelForCausalLM.from_pretrained("./saved_dolly")
+#config = AutoConfig.from_pretrained("./saved_dolly")
+#tokenizer = AutoTokenizer.from_pretrained("./saved_dolly")
+#model = AutoModelForCausalLM.from_pretrained("./saved_dolly")
 # model.load_state_dict(torch.load("./saved_dolly/states", weights_only=True, map_location='cuda'))
 
 # model = AutoModelForCausalLM.from_pretrained(
@@ -183,14 +186,16 @@ def read_documents():
         return []
 
     # Split documents into chunks
-    text_splitter = CharacterTextSplitter(chunk_size=DOC_CHUNK_SIZE, chunk_overlap=DOC_CHUNK_OVERLAP)
-    documents = text_splitter.split_documents(documents)
+    #text_splitter = CharacterTextSplitter(chunk_size=DOC_CHUNK_SIZE, chunk_overlap=DOC_CHUNK_OVERLAP)
+    text_splitter = SemanticChunker(OpenAIEmbeddings())
+    chunks = text_splitter.create_documents(documents)
+    #chunks = text_splitter.split_documents(documents)
 
     # Iterate to edit metadata to include chunk number
     # format = {filename}_{chunk number}
     chunk_num = 1
     prev_doc_id = documents[0].metadata['source']
-    for chunk in documents:
+    for chunk in chunks:
         if chunk.metadata['source'] != prev_doc_id:
             chunk_num = 1
             prev_doc_id = chunk.metadata['source']
